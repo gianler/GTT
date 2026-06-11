@@ -321,6 +321,7 @@
     .leaflet-control-attribution a { color: var(--accent) !important; }
 
     @media (max-width: 680px) {
+      :root { --blur: none; }
       #topbar { gap: 8px; }
       #brand .t2 { display: none; }
       #brand { padding: 8px 12px; }
@@ -756,8 +757,8 @@ function startMqtt() {
   log(`MQTT connect → ${MQTT_URL}`);
   mqttClient = mqtt.connect(MQTT_URL, {
     clientId: 'web_' + Math.random().toString(16).slice(2, 12),
-    keepalive: 60,
-    reconnectPeriod: 5000,
+    keepalive: 30,
+    reconnectPeriod: 3000,
     connectTimeout: 15_000,
     protocolVersion: 4,
     clean: true
@@ -791,6 +792,17 @@ function startMqtt() {
     }
   });
 }
+
+// su mobile il browser sospende il WebSocket in background:
+// quando la pagina torna visibile, forza subito la riconnessione
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  pruneStaleBuses();
+  if (mqttClient && !mqttClient.connected && !mqttClient.disconnecting) {
+    log('pagina di nuovo visibile: riconnessione immediata', 'warn');
+    try { mqttClient.reconnect(); } catch (e) { log('reconnect fail: ' + e.message, 'error'); }
+  }
+});
 
 function topicMatches(topic, filter) {
   const prefix = filter.replace(/#$/, '');
