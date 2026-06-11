@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GTT Torino – Bus in tempo reale</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0e17;
+      --panel: rgba(17, 21, 36, 0.72);
+      --panel-solid: #111524;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-glow: rgba(99, 161, 255, 0.35);
+      --text: #e8ecf6;
+      --text-dim: #8b93ab;
+      --accent: #63a1ff;
+      --accent2: #7df0c8;
+      --andata: #4d9fff;
+      --ritorno: #ff5d73;
+      --ok: #45e89e;
+      --warn: #ffc857;
+      --err: #ff5d73;
+      --radius: 16px;
+      --blur: blur(18px) saturate(1.4);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      font-family: 'Outfit', -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    #map { position: absolute; inset: 0; background: var(--bg); }
+    .leaflet-container { background: var(--bg); }
+
+    /* ---------- top bar flottante ---------- */
+    #topbar {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      right: 14px;
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+      z-index: 1000;
+      pointer-events: none;
+      flex-wrap: wrap;
+    }
+    #topbar > * { pointer-events: auto; }
+
+    #brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--panel);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    }
+    #brand .logo {
+      width: 34px; height: 34px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent) 0%, #3b6fe0 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 18px rgba(99, 161, 255, 0.5);
+    }
+    #brand .t1 { font-weight: 800; font-size: 0.95rem; letter-spacing: 0.02em; line-height: 1.1; }
+    #brand .t2 { font-weight: 300; font-size: 0.68rem; color: var(--text-dim); letter-spacing: 0.14em; text-transform: uppercase; }
+
+    /* ---------- ricerca linea ---------- */
+    #line-box {
+      position: relative;
+      flex: 1;
+      min-width: 180px;
+      max-width: 420px;
+    }
+    #line-input {
+      width: 100%;
+      height: 100%;
+      min-height: 54px;
+      padding: 0 18px 0 46px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--panel);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      outline: none;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+      transition: border-color 0.25s, box-shadow 0.25s;
+    }
+    #line-input::placeholder { color: var(--text-dim); font-weight: 300; }
+    #line-input:focus {
+      border-color: var(--border-glow);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 0 0 3px rgba(99, 161, 255, 0.15), 0 0 24px rgba(99,161,255,0.25);
+    }
+    #line-box .search-ico {
+      position: absolute;
+      left: 16px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      font-size: 15px;
+      pointer-events: none;
+    }
+    #line-suggest {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0; right: 0;
+      background: rgba(15, 18, 32, 0.92);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+      max-height: 52vh;
+      overflow-y: auto;
+      display: none;
+      z-index: 1100;
+      animation: pop 0.18s ease-out;
+    }
+    @keyframes pop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+    #line-suggest .item {
+      padding: 10px 14px;
+      cursor: pointer;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      transition: background 0.12s;
+    }
+    #line-suggest .item:last-child { border-bottom: none; }
+    #line-suggest .item:hover, #line-suggest .item.active { background: rgba(99, 161, 255, 0.12); }
+    #line-suggest .badge {
+      min-width: 46px;
+      text-align: center;
+      font-weight: 800;
+      font-size: 0.85rem;
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgba(99,161,255,0.25), rgba(99,161,255,0.08));
+      border: 1px solid rgba(99,161,255,0.3);
+      color: var(--accent);
+    }
+    #line-suggest .name { color: var(--text-dim); font-size: 0.8rem; font-weight: 300; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #line-suggest::-webkit-scrollbar { width: 8px; }
+    #line-suggest::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+
+    /* ---------- status pill ---------- */
+    #status {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: var(--panel);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+      margin-left: auto;
+    }
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      flex-shrink: 0;
+      position: relative;
+    }
+    .dot.ok { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+    .dot.ok::after {
+      content: '';
+      position: absolute; inset: -4px;
+      border-radius: 50%;
+      border: 2px solid var(--ok);
+      animation: pulse 2s ease-out infinite;
+    }
+    .dot.warn { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+    .dot.err { background: var(--err); box-shadow: 0 0 10px var(--err); }
+    @keyframes pulse { 0% { opacity: 0.9; transform: scale(0.6); } 100% { opacity: 0; transform: scale(1.6); } }
+    #status .col { line-height: 1.25; }
+    #status-main { font-size: 0.86rem; font-weight: 600; white-space: nowrap; }
+    #status-time { font-size: 0.68rem; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+    #bus-count {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 1.25rem;
+      color: var(--accent2);
+      text-shadow: 0 0 14px rgba(125, 240, 200, 0.5);
+      min-width: 30px;
+      text-align: center;
+    }
+    #bus-count.bump { animation: bump 0.35s ease; }
+    @keyframes bump { 30% { transform: scale(1.35); } }
+    #status .bus-lbl { font-size: 0.62rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.12em; text-align: center; }
+
+    /* ---------- debug ---------- */
+    #debug-toggle {
+      background: var(--panel);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-dim);
+      padding: 0 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      cursor: pointer;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+      transition: color 0.2s, border-color 0.2s;
+    }
+    #debug-toggle:hover, #debug-toggle.on { color: var(--accent2); border-color: rgba(125,240,200,0.35); }
+    #debug-panel {
+      position: absolute;
+      top: 82px;
+      right: 14px;
+      width: 380px;
+      max-width: calc(100vw - 28px);
+      max-height: 46vh;
+      overflow-y: auto;
+      background: rgba(10, 13, 24, 0.93);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+      color: #aab4d4;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      padding: 12px;
+      border-radius: var(--radius);
+      z-index: 900;
+      display: none;
+      border: 1px solid var(--border);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+    }
+    #debug-panel .log-row { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05); word-break: break-word; }
+    #debug-panel .lvl-err { color: var(--err); }
+    #debug-panel .lvl-warn { color: var(--warn); }
+    #debug-panel .lvl-ok { color: var(--ok); }
+    #debug-panel::-webkit-scrollbar { width: 8px; }
+    #debug-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+
+    /* ---------- legenda ---------- */
+    .legend {
+      position: absolute;
+      bottom: 22px;
+      left: 14px;
+      background: var(--panel);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 12px;
+      color: var(--text);
+      z-index: 800;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+      font-weight: 300;
+    }
+    .legend .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+    .legend .sw { width: 20px; height: 4px; border-radius: 2px; }
+    .legend .sw.a { background: var(--andata); box-shadow: 0 0 8px var(--andata); }
+    .legend .sw.r { background: var(--ritorno); box-shadow: 0 0 8px var(--ritorno); }
+
+    /* ---------- marker bus ---------- */
+    .bus-icon { background: none; border: none; }
+    .bus-arrow {
+      width: 34px; height: 34px;
+      display: flex; align-items: center; justify-content: center;
+      filter: drop-shadow(0 0 6px rgba(77, 159, 255, 0.8)) drop-shadow(0 2px 4px rgba(0,0,0,0.7));
+    }
+    .bus-arrow.rit { filter: drop-shadow(0 0 6px rgba(255, 93, 115, 0.8)) drop-shadow(0 2px 4px rgba(0,0,0,0.7)); }
+    .bus-arrow svg { width: 100%; height: 100%; transition: transform 0.4s ease-out; }
+
+    /* ---------- popup leaflet dark ---------- */
+    .leaflet-popup-content-wrapper {
+      background: rgba(15, 18, 32, 0.95);
+      backdrop-filter: var(--blur);
+      color: var(--text);
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      box-shadow: 0 14px 40px rgba(0,0,0,0.6);
+    }
+    .leaflet-popup-tip { background: rgba(15, 18, 32, 0.95); }
+    .leaflet-popup-close-button { color: var(--text-dim) !important; }
+    .fermata-popup { font-size: 13px; line-height: 1.45; }
+    .fermata-popup .code { color: var(--text-dim); font-size: 10px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.08em; }
+    .fermata-popup .name { font-weight: 600; color: var(--accent); }
+    .bus-popup { font-size: 13px; line-height: 1.6; min-width: 200px; }
+    .bus-popup .bus-id {
+      font-size: 1.05em; font-weight: 800; margin-bottom: 6px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .bus-popup .row { display: flex; justify-content: space-between; gap: 14px; color: var(--text-dim); }
+    .bus-popup .row span:last-child { color: var(--text); font-weight: 600; }
+    .bus-popup .row .dir-andata { color: var(--andata) !important; }
+    .bus-popup .row .dir-ritorno { color: var(--ritorno) !important; }
+
+    .leaflet-control-zoom a {
+      background: var(--panel-solid) !important;
+      color: var(--text) !important;
+      border-color: var(--border) !important;
+    }
+    .leaflet-control-attribution {
+      background: rgba(10, 13, 24, 0.7) !important;
+      color: var(--text-dim) !important;
+      font-size: 9px !important;
+    }
+    .leaflet-control-attribution a { color: var(--accent) !important; }
+
+    @media (max-width: 680px) {
+      #topbar { gap: 8px; }
+      #brand .t2 { display: none; }
+      #brand { padding: 8px 12px; }
+      #status { gap: 10px; padding: 6px 12px; }
+      #status-main { font-size: 0.78rem; }
+      #line-box { min-width: 140px; order: 5; flex-basis: 100%; max-width: none; }
+      #line-input { min-height: 46px; }
+      #debug-panel { top: 130px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="topbar">
+  <div id="brand">
+    <div class="logo">🚌</div>
+    <div>
+      <div class="t1">GTT Live</div>
+      <div class="t2">Torino · tempo reale</div>
+    </div>
+  </div>
+  <div id="line-box">
+    <span class="search-ico">🔍</span>
+    <input id="line-input" type="text" placeholder="Cerca linea… (39, 4, 68, metro)" autocomplete="off" spellcheck="false">
+    <div id="line-suggest"></div>
+  </div>
+  <div id="status">
+    <div class="dot" id="status-dot"></div>
+    <div class="col">
+      <div id="status-main">Inizializzazione…</div>
+      <div id="status-time"></div>
+    </div>
+    <div class="col">
+      <div id="bus-count">0</div>
+      <div class="bus-lbl">bus</div>
+    </div>
+  </div>
+  <button id="debug-toggle">debug</button>
+</div>
+
+<div id="debug-panel"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-rotatedmarker@0.2.0/leaflet.rotatedMarker.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+'use strict';
+
+const GRAPHQL_URL = 'https://plan.muoversiatorino.it/otp/routers/mato/index/graphql';
+const MQTT_URL = 'wss://mapi.5t.torino.it/scre';
+const BUS_STALE_MS = 90_000;
+const COLOR_ANDATA = '#4d9fff';
+const COLOR_RITORNO = '#ff5d73';
+
+const log = (() => {
+  const panel = document.getElementById('debug-panel');
+  const rows = [];
+  return (msg, level = 'info') => {
+    const t = new Date().toLocaleTimeString('it-IT');
+    const line = `[${t}] ${msg}`;
+    console.log(line);
+    rows.push({ line, level });
+    if (rows.length > 50) rows.shift();
+    panel.innerHTML = rows.map(r => `<div class="log-row lvl-${r.level === 'error' ? 'err' : r.level === 'warn' ? 'warn' : r.level === 'ok' ? 'ok' : ''}">${escapeHtml(r.line)}</div>`).join('');
+    panel.scrollTop = panel.scrollHeight;
+  };
+})();
+function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+document.getElementById('debug-toggle').addEventListener('click', (e) => {
+  const p = document.getElementById('debug-panel');
+  const on = p.style.display !== 'block';
+  p.style.display = on ? 'block' : 'none';
+  e.currentTarget.classList.toggle('on', on);
+});
+
+const map = L.map('map', { zoomControl: true }).setView([45.07, 7.68], 12);
+map.zoomControl.setPosition('bottomright');
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/">OSM</a> © <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 20
+}).addTo(map);
+
+const legend = L.control({ position: 'bottomleft' });
+legend.onAdd = () => {
+  const div = L.DomUtil.create('div', 'legend');
+  div.innerHTML = `
+    <div class="row"><div class="sw a"></div>Andata</div>
+    <div class="row"><div class="sw r"></div>Ritorno</div>
+    <div class="row"><span style="font-size:13px">⭘</span>Fermata</div>
+  `;
+  return div;
+};
+legend.addTo(map);
+
+function decodePolyline(str, precision = 5) {
+  let index = 0, lat = 0, lng = 0;
+  const coords = [];
+  const factor = Math.pow(10, precision);
+  while (index < str.length) {
+    let b, shift = 0, result = 0;
+    do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lat += dlat;
+    shift = 0; result = 0;
+    do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lng += dlng;
+    coords.push([lat / factor, lng / factor]);
+  }
+  return coords;
+}
+
+async function gql(query, variables, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(GRAPHQL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query, variables })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.errors) throw new Error('GraphQL: ' + JSON.stringify(data.errors));
+      return data.data;
+    } catch (e) {
+      log(`GraphQL tentativo ${attempt}/${retries}: ${e.message}`, 'warn');
+      if (attempt === retries) throw e;
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
+  }
+}
+
+// ---- elenco linee ----
+let allRoutes = [];
+
+async function fetchAllRoutes() {
+  const data = await gql(`query { routes(feeds: ["gtt"]) { gtfsId shortName longName mode } }`);
+  allRoutes = (data.routes || [])
+    .filter(r => r.shortName)
+    .sort((a, b) => {
+      const na = parseInt(a.shortName, 10), nb = parseInt(b.shortName, 10);
+      if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+      return a.shortName.localeCompare(b.shortName, 'it', { numeric: true });
+    });
+  log(`linee caricate: ${allRoutes.length}`, 'ok');
+}
+
+// ---- ricerca/selettore ----
+const input = document.getElementById('line-input');
+const suggest = document.getElementById('line-suggest');
+let suggestIndex = -1;
+
+function modeIcon(mode) {
+  return mode === 'TRAM' ? '🚋' : mode === 'SUBWAY' ? '🚇' : mode === 'RAIL' ? '🚆' : '🚌';
+}
+
+function renderSuggest(list) {
+  if (!list.length) { suggest.style.display = 'none'; suggestIndex = -1; return; }
+  suggest.innerHTML = list.slice(0, 40).map((r, i) =>
+    `<div class="item" data-i="${i}">
+      <span class="badge">${modeIcon(r.mode)} ${escapeHtml(r.shortName)}</span>
+      <span class="name">${escapeHtml(r.longName || '')}</span>
+    </div>`).join('');
+  suggest.style.display = 'block';
+  suggestIndex = -1;
+  suggest._list = list.slice(0, 40);
+}
+
+function filterRoutes(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return allRoutes;
+  const exact = allRoutes.filter(r => r.shortName.toLowerCase() === q);
+  const starts = allRoutes.filter(r => r.shortName.toLowerCase().startsWith(q) && !exact.includes(r));
+  const inName = allRoutes.filter(r => !exact.includes(r) && !starts.includes(r) &&
+    ((r.longName || '').toLowerCase().includes(q) || r.shortName.toLowerCase().includes(q)));
+  return [...exact, ...starts, ...inName];
+}
+
+input.addEventListener('input', () => renderSuggest(filterRoutes(input.value)));
+input.addEventListener('focus', () => renderSuggest(filterRoutes(input.value)));
+input.addEventListener('keydown', e => {
+  const items = suggest.querySelectorAll('.item');
+  if (e.key === 'ArrowDown') { e.preventDefault(); suggestIndex = Math.min(suggestIndex + 1, items.length - 1); highlight(items); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); suggestIndex = Math.max(suggestIndex - 1, 0); highlight(items); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    const list = suggest._list || [];
+    const pick = suggestIndex >= 0 ? list[suggestIndex] : filterRoutes(input.value)[0];
+    if (pick) selectRoute(pick);
+  } else if (e.key === 'Escape') {
+    suggest.style.display = 'none';
+  }
+});
+function highlight(items) {
+  items.forEach((el, i) => el.classList.toggle('active', i === suggestIndex));
+  if (items[suggestIndex]) items[suggestIndex].scrollIntoView({ block: 'nearest' });
+}
+suggest.addEventListener('mousedown', e => {
+  const item = e.target.closest('.item');
+  if (!item) return;
+  e.preventDefault();
+  const r = (suggest._list || [])[Number(item.dataset.i)];
+  if (r) selectRoute(r);
+});
+document.addEventListener('click', e => {
+  if (!document.getElementById('line-box').contains(e.target)) suggest.style.display = 'none';
+});
+
+// ---- stato linea corrente ----
+let currentRoute = null;
+let currentTopic = null;
+const stopByCode = new Map();
+const routeLayers = [];
+const buses = new Map();
+
+function clearLine() {
+  routeLayers.forEach(l => map.removeLayer(l));
+  routeLayers.length = 0;
+  stopByCode.clear();
+  for (const [, entry] of buses) map.removeLayer(entry.marker);
+  buses.clear();
+}
+
+async function selectRoute(r) {
+  suggest.style.display = 'none';
+  input.value = r.shortName;
+  input.blur();
+  if (currentRoute && currentRoute.gtfsId === r.gtfsId) return;
+  currentRoute = r;
+  document.title = `Linea ${r.shortName} GTT – In tempo reale`;
+  const url = new URL(location.href);
+  url.searchParams.set('linea', r.shortName);
+  history.replaceState(null, '', url);
+  clearLine();
+  const lineCode = r.gtfsId.replace(/^gtt:/, '').replace(/U$/, '');
+  switchTopic(`/${lineCode}/#`);
+  try {
+    const data = await gql(`query Linea($id: String!) {
+      route(id: $id) {
+        shortName
+        patterns {
+          code
+          directionId
+          headsign
+          patternGeometry { points length }
+          stops { gtfsId code name lat lon }
+        }
+      }
+    }`, { id: r.gtfsId });
+    if (!data.route) throw new Error('route null per ' + r.gtfsId);
+    if (currentRoute !== r) return;
+    drawRoute(data.route);
+    log(`linea ${r.shortName}: ${stopByCode.size} fermate`, 'ok');
+  } catch (e) {
+    log('caricamento percorso fallito: ' + e.message, 'error');
+    document.getElementById('status-main').textContent = 'percorso non caricato';
+    document.getElementById('status-dot').className = 'dot err';
+  }
+  updateStatus();
+}
+
+function drawRoute(route) {
+  const allBounds = [];
+  const patternsByDir = {};
+  route.patterns.forEach(p => {
+    const dir = p.directionId;
+    if (!patternsByDir[dir] || (p.patternGeometry?.length || 0) > (patternsByDir[dir].patternGeometry?.length || 0)) {
+      patternsByDir[dir] = p;
+    }
+  });
+  Object.values(patternsByDir).forEach(p => {
+    const color = p.directionId === 0 ? COLOR_ANDATA : COLOR_RITORNO;
+    if (p.patternGeometry?.points) {
+      const coords = decodePolyline(p.patternGeometry.points);
+      // alone esterno + linea: effetto neon
+      const halo = L.polyline(coords, { color, weight: 10, opacity: 0.18 }).addTo(map);
+      const line = L.polyline(coords, { color, weight: 4, opacity: 0.9 }).addTo(map);
+      line.bindTooltip(`${p.directionId === 0 ? 'Andata' : 'Ritorno'} · ${p.headsign}`, { sticky: true });
+      routeLayers.push(halo, line);
+      allBounds.push(...coords);
+    }
+    (p.stops || []).forEach(s => {
+      const code = String(s.code);
+      if (stopByCode.has(code)) return;
+      stopByCode.set(code, s);
+      const m = L.circleMarker([s.lat, s.lon], {
+        radius: 4.5,
+        color: '#0b0e17',
+        weight: 2,
+        fillColor: '#e8ecf6',
+        fillOpacity: 1
+      }).addTo(map);
+      m.bindPopup(`<div class="fermata-popup"><div class="code">FERMATA ${escapeHtml(code)}</div><div class="name">🚏 ${escapeHtml(s.name)}</div></div>`);
+      routeLayers.push(m);
+      allBounds.push([s.lat, s.lon]);
+    });
+  });
+  if (allBounds.length) map.fitBounds(allBounds, { padding: [40, 40] });
+}
+
+function busIconSvg(color) {
+  const rit = color === COLOR_RITORNO;
+  return `<div class="bus-arrow${rit ? ' rit' : ''}"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="16" cy="16" r="14" fill="${color}" stroke="#0b0e17" stroke-width="2"/>
+    <path d="M16 5 L23 22 L16 18 L9 22 Z" fill="#0b0e17"/>
+  </svg></div>`;
+}
+
+function makeBusIcon(color) {
+  return L.divIcon({
+    className: 'bus-icon',
+    html: busIconSvg(color),
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+    popupAnchor: [0, -18]
+  });
+}
+
+function busPopup(vehicleId, v) {
+  const stop = v.nextStop != null ? stopByCode.get(String(v.nextStop)) : null;
+  const dirCls = v.directionId === 1 ? 'dir-ritorno' : 'dir-andata';
+  const dirLbl = v.directionId === 1 ? 'Ritorno' : 'Andata';
+  return `<div class="bus-popup">
+    <div class="bus-id">🚌 Bus ${escapeHtml(vehicleId)}</div>
+    <div class="row"><span>Direzione</span><span class="${dirCls}">${dirLbl}</span></div>
+    <div class="row"><span>Velocità</span><span>${v.speed != null ? v.speed + ' km/h' : '—'}</span></div>
+    <div class="row"><span>Prossima fermata</span><span>${stop ? escapeHtml(stop.name) : (v.nextStop ?? '—')}</span></div>
+    <div class="row" style="margin-top:4px"><span>Aggiornato</span><span>${v.lastSeen.toLocaleTimeString('it-IT')}</span></div>
+  </div>`;
+}
+
+function updateBus(vehicleId, arr) {
+  const v = {
+    lat: arr[0],
+    lon: arr[1],
+    bearing: arr[2] ?? 0,
+    speed: arr[3],
+    tripId: arr[4],
+    directionId: arr[5] ?? 0,
+    nextStop: arr[6],
+    capacity: arr[7],
+    lastSeen: new Date()
+  };
+  if (typeof v.lat !== 'number' || typeof v.lon !== 'number') return;
+  const color = v.directionId === 1 ? COLOR_RITORNO : COLOR_ANDATA;
+  let entry = buses.get(vehicleId);
+  if (!entry) {
+    const marker = L.marker([v.lat, v.lon], {
+      icon: makeBusIcon(color),
+      rotationAngle: v.bearing,
+      rotationOrigin: 'center center',
+      zIndexOffset: 1000
+    }).addTo(map);
+    marker.bindPopup('');
+    entry = { marker, v, color };
+    buses.set(vehicleId, entry);
+    bumpCounter();
+  } else {
+    entry.marker.setLatLng([v.lat, v.lon]);
+    entry.marker.setRotationAngle(v.bearing);
+    if (entry.color !== color) {
+      entry.marker.setIcon(makeBusIcon(color));
+      entry.color = color;
+    }
+    entry.v = v;
+  }
+  entry.marker.setPopupContent(busPopup(vehicleId, v));
+  updateStatus();
+}
+
+function bumpCounter() {
+  const el = document.getElementById('bus-count');
+  el.classList.remove('bump');
+  void el.offsetWidth;
+  el.classList.add('bump');
+}
+
+function pruneStaleBuses() {
+  const now = Date.now();
+  for (const [id, entry] of buses) {
+    if (now - entry.v.lastSeen.getTime() > BUS_STALE_MS) {
+      map.removeLayer(entry.marker);
+      buses.delete(id);
+      log(`bus ${id} rimosso (stale)`);
+    }
+  }
+  updateStatus();
+}
+setInterval(pruneStaleBuses, 15_000);
+
+// ---- MQTT ----
+let mqttClient = null;
+let mqttState = 'init';
+let lastMsgAt = null;
+
+function updateStatus() {
+  const mainEl = document.getElementById('status-main');
+  const timeEl = document.getElementById('status-time');
+  const dotEl = document.getElementById('status-dot');
+  const countEl = document.getElementById('bus-count');
+  countEl.textContent = buses.size;
+  const linea = currentRoute ? `Linea ${currentRoute.shortName}` : 'Scegli una linea';
+  let dot = '', txt = 'Inizializzazione…';
+  if (!currentRoute && mqttState === 'connected') { dot = 'ok'; txt = linea; }
+  else if (mqttState === 'connected') { dot = 'ok'; txt = `${linea} · connesso`; }
+  else if (mqttState === 'reconnect') { dot = 'warn'; txt = `${linea} · riconnessione…`; }
+  else if (mqttState === 'offline') { dot = 'warn'; txt = `${linea} · offline`; }
+  else if (mqttState === 'error') { dot = 'err'; txt = `${linea} · errore connessione`; }
+  mainEl.textContent = txt;
+  dotEl.className = 'dot ' + dot;
+  timeEl.textContent = lastMsgAt ? `ultimo dato ${lastMsgAt.toLocaleTimeString('it-IT')}` : '';
+}
+
+function switchTopic(newTopic) {
+  if (!mqttClient) { currentTopic = newTopic; return; }
+  if (currentTopic && currentTopic !== newTopic && mqttClient.connected) {
+    mqttClient.unsubscribe(currentTopic, () => log(`unsub ${currentTopic}`));
+  }
+  currentTopic = newTopic;
+  if (mqttClient.connected) {
+    mqttClient.subscribe(newTopic, { qos: 0 }, (err, granted) => {
+      if (err) log('subscribe error: ' + err.message, 'error');
+      else log(`sub OK: ${granted.map(g => g.topic).join(', ')}`, 'ok');
+    });
+  }
+}
+
+function startMqtt() {
+  log(`MQTT connect → ${MQTT_URL}`);
+  mqttClient = mqtt.connect(MQTT_URL, {
+    clientId: 'web_' + Math.random().toString(16).slice(2, 12),
+    keepalive: 60,
+    reconnectPeriod: 5000,
+    connectTimeout: 15_000,
+    protocolVersion: 4,
+    clean: true
+  });
+  mqttClient.on('connect', () => {
+    mqttState = 'connected';
+    log('MQTT connesso', 'ok');
+    if (currentTopic) {
+      mqttClient.subscribe(currentTopic, { qos: 0 }, (err, granted) => {
+        if (err) log('subscribe error: ' + err.message, 'error');
+        else log(`sub OK: ${granted.map(g => g.topic).join(', ')}`, 'ok');
+      });
+    }
+    updateStatus();
+  });
+  mqttClient.on('reconnect', () => { mqttState = 'reconnect'; log('riconnessione MQTT', 'warn'); updateStatus(); });
+  mqttClient.on('offline', () => { mqttState = 'offline'; log('MQTT offline', 'warn'); updateStatus(); });
+  mqttClient.on('error', e => { mqttState = 'error'; log('MQTT error: ' + (e?.message || e), 'error'); updateStatus(); });
+  mqttClient.on('close', () => log('MQTT close'));
+  mqttClient.on('message', (topic, payload) => {
+    try {
+      if (currentTopic && !topicMatches(topic, currentTopic)) return;
+      const parts = topic.split('/').filter(Boolean);
+      const vehicleId = parts[parts.length - 1];
+      const arr = JSON.parse(payload.toString());
+      if (!Array.isArray(arr)) return;
+      lastMsgAt = new Date();
+      updateBus(vehicleId, arr);
+    } catch (e) {
+      log('parse msg fail: ' + e.message + ' topic=' + topic, 'warn');
+    }
+  });
+}
+
+function topicMatches(topic, filter) {
+  const prefix = filter.replace(/#$/, '');
+  return topic.startsWith(prefix);
+}
+
+(async function init() {
+  startMqtt();
+  updateStatus();
+  try {
+    await fetchAllRoutes();
+  } catch (e) {
+    log('caricamento elenco linee fallito: ' + e.message, 'error');
+    document.getElementById('status-main').textContent = 'elenco linee non caricato';
+    document.getElementById('status-dot').className = 'dot err';
+    return;
+  }
+  const param = new URLSearchParams(location.search).get('linea') || '39';
+  const r = allRoutes.find(x => x.shortName.toLowerCase() === param.toLowerCase());
+  if (r) selectRoute(r);
+  else log(`linea "${param}" non trovata`, 'warn');
+})();
+</script>
+</body>
+</html>
