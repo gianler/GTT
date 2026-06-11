@@ -420,6 +420,9 @@ legend.onAdd = () => {
 };
 legend.addTo(map);
 
+// trascinamento manuale: smetti di seguire il bus
+map.on('dragstart', () => { followedBusId = null; });
+
 function decodePolyline(str, precision = 5) {
   let index = 0, lat = 0, lng = 0;
   const coords = [];
@@ -537,11 +540,13 @@ document.addEventListener('click', e => {
 // ---- stato linea corrente ----
 let currentRoute = null;
 let currentTopic = null;
+let followedBusId = null;   // bus da tenere centrato (popup aperto)
 const stopByCode = new Map();
 const routeLayers = [];
 const buses = new Map();
 
 function clearLine() {
+  followedBusId = null;
   routeLayers.forEach(l => map.removeLayer(l));
   routeLayers.length = 0;
   stopByCode.clear();
@@ -679,12 +684,21 @@ function updateBus(vehicleId, arr) {
       rotationOrigin: 'center center',
       zIndexOffset: 1000
     }).addTo(map);
-    marker.bindPopup('');
+    marker.bindPopup('', { autoPan: false });
+    marker.on('popupopen', () => {
+      followedBusId = vehicleId;
+      map.panTo(marker.getLatLng(), { animate: true });
+      log(`seguo bus ${vehicleId}`);
+    });
+    marker.on('popupclose', () => {
+      if (followedBusId === vehicleId) followedBusId = null;
+    });
     entry = { marker, v, color };
     buses.set(vehicleId, entry);
     bumpCounter();
   } else {
     entry.marker.setLatLng([v.lat, v.lon]);
+    if (followedBusId === vehicleId) map.panTo([v.lat, v.lon], { animate: true });
     entry.marker.setRotationAngle(v.bearing);
     if (entry.color !== color) {
       entry.marker.setIcon(makeBusIcon(color));
